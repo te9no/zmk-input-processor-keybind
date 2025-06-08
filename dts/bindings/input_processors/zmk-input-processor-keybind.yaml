@@ -1,0 +1,36 @@
+# Copyright (c) 2024, The ZMK Contributors
+# SPDX-License-Identifier: MIT
+
+description: Input Processor for key binding from relative input
+
+compatible: "zmk,input-processor-keybind"
+
+include: base.yaml
+
+properties:
+  "#input-processor-cells":
+    type: int
+    const: 0
+    required: true
+  type:
+    type: int
+  key-codes:
+    type: array
+    required: true
+    description: Array of key codes (UP, DOWN, LEFT, RIGHT)
+  track-remainders:
+    type: boolean
+    description: Track remaining movement
+    required: false
+  tap-ms:
+    type: int
+    description: Tap duration in milliseconds
+    default: 10
+  wait-ms:
+    type: int
+    description: Wait duration in milliseconds
+    default: 50
+  tick:
+    type: int
+    description: Movement threshold
+    default: 50

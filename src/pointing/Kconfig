@@ -1,0 +1,15 @@
+# Copyright (c) 2023 The ZMK Contributors
+# SPDX-License-Identifier: MIT
+
+if ZMK_POINTING
+
+config ZMK_INPUT_PROCESSOR_KEYBIND
+    bool "Split Payload Compression Input Processor"
+    default y
+    depends on DT_HAS_ZMK_INPUT_PROCESSOR_KEYBIND_ENABLED
+
+config ZMK_INPUT_PROCESSOR_KEYBIND_CODES_MAX_LEN
+    int "Maximum codes length"
+    default 2
+
+endif
