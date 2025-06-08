@@ -8,6 +8,10 @@
         #input-processor-cells = <0>;  // No parameters needed
         type = <INPUT_EV_REL>;
         track-remainders;
-        key-codes = <UP DOWN LEFT RIGHT>;  // デフォルト値
+        bindings =
+            <&kp RIGHT_ARROW>,
+            <&kp LEFT_ARROW>,
+            <&kp UP_ARROW>,
+            <&kp DOWN_ARROW>;
     };
 };

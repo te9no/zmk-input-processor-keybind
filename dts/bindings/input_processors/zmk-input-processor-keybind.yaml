@@ -12,12 +12,12 @@ properties:
     type: int
     const: 0
     required: true
+  bindings:
+    description: "Behaviors to be invoked"
+    type: phandle-array
+    required: true
   type:
     type: int
-  key-codes:
-    type: array
-    required: true
-    description: Array of key codes (UP, DOWN, LEFT, RIGHT)
   track-remainders:
     type: boolean
     description: Track remaining movement

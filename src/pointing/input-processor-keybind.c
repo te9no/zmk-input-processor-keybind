@@ -13,19 +13,24 @@
 
 #include <zephyr/logging/log.h>
 #include <zmk/behavior.h>
+#include <dt-bindings/zmk/keys.h>
 
 LOG_MODULE_DECLARE(zmk, CONFIG_ZMK_LOG_LEVEL);
 
 #include <zmk/keymap.h>
 
+// Add function declaration
+int zmk_behavior_queue_add(struct zmk_behavior_binding_event *event,
+                          struct zmk_behavior_binding binding,
+                          bool press, uint32_t wait);
+
 struct zip_keybind_config {
     uint8_t type;
     bool track_remainders;
-    size_t key_codes_len;
-    uint16_t key_codes[4];  // UP, DOWN, LEFT, RIGHT
-    uint32_t tap_ms;        // タップ時間
-    uint32_t wait_ms;       // 待機時間
-    uint32_t tick;          // 閾値
+    const struct zmk_behavior_binding *bindings;  // Changed from key_codes
+    uint32_t tap_ms;
+    uint32_t wait_ms;
+    uint32_t tick;
 };
 
 struct zip_keybind_data {
@@ -36,10 +41,11 @@ struct zip_keybind_data {
 };
 
 #define DIRECTION_THRESHOLD 50  // 方向キー入力と判定する閾値
-#define KEY_UP    103  // 上キーのキーコード
-#define KEY_DOWN  108  // 下キーのキーコード
-#define KEY_LEFT  105  // 左キーのキーコード
-#define KEY_RIGHT 106  // 右キーのキーコード
+// キーコードをZMKの定義に合わせる
+#define KEY_UP    KC_UP    // ZMKのキーコード
+#define KEY_DOWN  KC_DOWN
+#define KEY_LEFT  KC_LEFT
+#define KEY_RIGHT KC_RIGHT
 
 static int zip_keybind_handle_event(const struct device *dev, struct input_event *event, 
                                 uint32_t param1, uint32_t param2, 
@@ -70,19 +76,16 @@ static int zip_keybind_handle_event(const struct device *dev, struct input_event
 
     if (idx != -1) {
         struct zmk_behavior_binding_event ev = {
-            .position = 0,
-            .timestamp = k_uptime_get()
+            .position = INT32_MAX,
+            .timestamp = k_uptime_get(),
+#if IS_ENABLED(CONFIG_ZMK_SPLIT)
+            .source = ZMK_POSITION_STATE_CHANGE_SOURCE_LOCAL,
+#endif
         };
 
-        struct zmk_behavior_binding binding = {
-            .behavior_dev = zmk_behavior_get_binding("&kp"),
-            .param1 = cfg->key_codes[idx],
-            .param2 = 0
-        };
-
-        zmk_behavior_queue_add(&ev, binding, true, cfg->tap_ms);
-        zmk_behavior_queue_add(&ev, binding, false, cfg->wait_ms);
-        k_sleep(K_MSEC(10));
+        LOG_DBG("Queue key event: binding %d", idx);
+        zmk_behavior_queue_add(&ev, cfg->bindings[idx], true, cfg->tap_ms);
+        zmk_behavior_queue_add(&ev, cfg->bindings[idx], false, cfg->wait_ms);
 
         if (!cfg->track_remainders) {
             data->delta_x = 0;
@@ -97,30 +100,26 @@ static struct zmk_input_processor_driver_api sy_driver_api = {
     .handle_event = zip_keybind_handle_event,
 };
 
-// デフォルトのキーコード配列を定義（最初に定義する必要があります）
-static const uint16_t default_key_codes[] = {KEY_UP, KEY_DOWN, KEY_LEFT, KEY_RIGHT};
-
 static int zip_keybind_init(const struct device *dev) {
     struct zip_keybind_data *data = dev->data;
-    struct zip_keybind_config *config = (struct zip_keybind_config *)dev->config;
 
-    // 座標値の初期化
+    // Only initialize coordinates
     data->last_x = 0;
     data->last_y = 0;
-
-    // デフォルトのキーコードを設定
-    memcpy(config->key_codes, default_key_codes, sizeof(config->key_codes));
-    config->key_codes_len = 4;
+    data->delta_x = 0;
+    data->delta_y = 0;
 
     return 0;
 }
 
 #define ZIP_KEYBIND_INST(n)                                                                        \
     static struct zip_keybind_data data_##n = {};                                                  \
+    BUILD_ASSERT(DT_INST_PROP_LEN(n, bindings) == 4, "Must have exactly 4 bindings");             \
+    static const struct zmk_behavior_binding bindings_##n[] = DT_INST_PROP(n, bindings);           \
     static struct zip_keybind_config config_##n = {                                                \
         .type = INPUT_EV_REL,                                                                      \
         .track_remainders = DT_INST_PROP_OR(n, track_remainders, false),                          \
-        .key_codes_len = 4,                                                                        \
+        .bindings = bindings_##n,                                                                  \
         .tap_ms = DT_INST_PROP_OR(n, tap_ms, 10),                                                \
         .wait_ms = DT_INST_PROP_OR(n, wait_ms, 50),                                              \
         .tick = DT_INST_PROP_OR(n, tick, DIRECTION_THRESHOLD)                                     \
