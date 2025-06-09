@@ -35,8 +35,8 @@ struct zip_keybind_config {
 };
 
 struct zip_keybind_data {
-    int16_t delta_x;
-    int16_t delta_y;
+    int32_t delta_x;
+    int32_t delta_y;
 };
 
 static int zip_keybind_handle_event(const struct device *dev, struct input_event *event,
@@ -44,7 +44,7 @@ static int zip_keybind_handle_event(const struct device *dev, struct input_event
                                     struct zmk_input_processor_state *state) {
     const struct zip_keybind_config *cfg = dev->config;
     struct zip_keybind_data *data = dev->data;
-    int16_t value = (int16_t)event->value;
+    int32_t value = event->value;
 
     if (event->type != INPUT_EV_REL) {
         return ZMK_INPUT_PROC_CONTINUE;
@@ -85,27 +85,12 @@ static int zip_keybind_handle_event(const struct device *dev, struct input_event
 #endif
         };
 
-        const struct zmk_behavior_binding *binding = NULL;
-        if (idx == 0) {
-            binding = &cfg->bindings[1];
-        } else if (idx == 1) {
-            binding = &cfg->bindings[0];
-        } else if (idx == 2) {
-            binding = &cfg->bindings[3];
-        } else if (idx == 3) {
-            binding = &cfg->bindings[2];
-        } else {
-            LOG_WRN("Invalid IDX %d", idx);
-        }
+        LOG_DBG("trigger binding: %s 0x%02x 0x%02x tap: %d ms hold %d ms",
+                cfg->bindings[idx].behavior_dev, cfg->bindings[idx].param1,
+                cfg->bindings[idx].param2, cfg->tap_ms, cfg->wait_ms);
 
-        if (binding) {
-            LOG_DBG("trigger binding: %s 0x%02x 0x%02x tap: %d ms hold %d ms",
-                    binding->behavior_dev, binding->param1, binding->param2, cfg->tap_ms,
-                    cfg->wait_ms);
-
-            zmk_behavior_queue_add(&ev, *binding, true, cfg->tap_ms);
-            zmk_behavior_queue_add(&ev, *binding, false, cfg->wait_ms);
-        }
+        zmk_behavior_queue_add(&ev, cfg->bindings[idx], true, cfg->tap_ms);
+        zmk_behavior_queue_add(&ev, cfg->bindings[idx], false, cfg->wait_ms);
 
         return ZMK_INPUT_PROC_STOP;
     }
