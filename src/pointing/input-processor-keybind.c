@@ -116,22 +116,21 @@ static int zip_keybind_init(const struct device *dev) {
 
 
 #define TRANSFORMED_BINDINGS(n)                                                                    \
-    { LISTIFY(DT_PROP_LEN(n, bindings), ZMK_KEYMAP_EXTRACT_BINDING, (, ), n) }
+    {LISTIFY(DT_INST_PROP_LEN(n, bindings), ZMK_KEYMAP_EXTRACT_BINDING, (, ), DT_DRV_INST(n))}
 
 #define ZIP_KEYBIND_INST(n)                                                                        \
-    static struct zip_keybind_data data_##n = {};                                                  \
-    static struct zmk_behavior_binding                                                             \
-        config_##n##_bindings[DT_PROP_LEN(n, bindings)] = TRANSFORMED_BINDINGS(n); \
+    static struct zip_keybind_data zip_keybind_data_##n = {};                                      \
+    static struct zmk_behavior_binding config_##n_bindings[] = TRANSFORMED_BINDINGS(n);            \
     static struct zip_keybind_config config_##n = {                                                \
-        .bindings_len = DT_PROP_LEN(n, bindings),                                                  \
-        .bindings = config_##n##_bindings,                                             \
+        .bindings_len = DT_INST_PROP_LEN(n, bindings),                                             \
+        .bindings = config_##n_bindings,                                                           \
         .type = INPUT_EV_REL,                                                                      \
-        .track_remainders = DT_INST_PROP_OR(n, track_remainders, false),                          \
-        .tap_ms = DT_INST_PROP_OR(n, tap_ms, 10),                                                \
-        .wait_ms = DT_INST_PROP_OR(n, wait_ms, 50),                                              \
-        .tick = DT_INST_PROP_OR(n, tick, DIRECTION_THRESHOLD)                                     \
-    };                                                                                             \
-    DEVICE_DT_INST_DEFINE(n, &zip_keybind_init, NULL, &data_##n, &config_##n, POST_KERNEL,        \
-                          CONFIG_KERNEL_INIT_PRIORITY_DEFAULT, &sy_driver_api);
+        .track_remainders = DT_INST_PROP_OR(n, track_remainders, false),                           \
+        .tap_ms = DT_INST_PROP_OR(n, tap_ms, 30),                                                  \
+        .wait_ms = DT_INST_PROP_OR(n, wait_ms, 15),                                                \
+        .tick = DT_INST_PROP_OR(n, tick, DIRECTION_THRESHOLD)};                                    \
+    DEVICE_DT_INST_DEFINE(n, &zip_keybind_init, NULL, &zip_keybind_data_##n, &config_##n,          \
+                          POST_KERNEL, CONFIG_KERNEL_INIT_PRIORITY_DEFAULT, &sy_driver_api);
 
-DT_INST_FOREACH_CHILD(0, ZIP_KEYBIND_INST)
+DT_INST_FOREACH_STATUS_OKAY(ZIP_KEYBIND_INST)
+// DT_INST_FOREACH_CHILD(0, ZIP_KEYBIND_INST)
