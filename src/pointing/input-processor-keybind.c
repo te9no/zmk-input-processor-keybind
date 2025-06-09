@@ -22,6 +22,8 @@
 
 #define DT_DRV_COMPAT zmk_input_processor_keybind
 
+#define DIRECTION_THRESHOLD 10
+
 LOG_MODULE_DECLARE(zmk, CONFIG_ZMK_LOG_LEVEL);
 
 struct zip_keybind_config {
