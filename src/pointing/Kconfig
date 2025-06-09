@@ -10,6 +10,6 @@ config ZMK_INPUT_PROCESSOR_KEYBIND
 
 config ZMK_INPUT_PROCESSOR_KEYBIND_CODES_MAX_LEN
     int "Maximum codes length"
-    default 2
+    default 4
 
 endif
