@@ -1,7 +1,4 @@
-#include <zephyr/dt-bindings/dt-util.h>
-#ifndef ZMK_DT_BINDINGS_INPUT_PROCESSOR_KEYBIND_H
-#define ZMK_DT_BINDINGS_INPUT_PROCESSOR_KEYBIND_H
+#define ZMK_INPUT_PROCESSOR_KEYBIND(name) \
+    DT_INST(name, zmk_input_processor_keybind)
 
-#define DIRECTION_THRESHOLD 50
 
-#endif /* ZMK_DT_BINDINGS_INPUT_PROCESSOR_KEYBIND_H */

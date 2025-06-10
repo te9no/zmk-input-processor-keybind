@@ -12,7 +12,6 @@
 #include <drivers/behavior.h>
 #include <zmk/keymap.h>
 #include <zmk/behavior.h>
-#include <zmk/keys.h>
 #include <zmk/virtual_key_position.h>
 #include <zmk/behavior_queue.h>
 #include <zmk/event_manager.h>
@@ -50,9 +49,7 @@ static int zip_keybind_handle_event(const struct device *dev, struct input_event
         return ZMK_INPUT_PROC_CONTINUE;
     }
 
-    // LOG_DBG("zip_keybind_handle_event val: %d", value);
-    // k_sleep(K_MSEC(10));
-    //  動きを蓄積
+    // 動きを蓄積
     if (event->code == INPUT_REL_X) {
         data->delta_x += value;
     } else if (event->code == INPUT_REL_Y) {
@@ -66,17 +63,14 @@ static int zip_keybind_handle_event(const struct device *dev, struct input_event
 
     int idx = -1;
     if (abs(data->delta_x) >= cfg->tick) {
-        idx = data->delta_x > 0 ? 0 : 1; // LEFT : RIGHT (順番入れ替え)
+        idx = data->delta_x > 0 ? 0 : 1; // RIGHT : LEFT
         data->delta_x %= cfg->tick;
     } else if (abs(data->delta_y) >= cfg->tick) {
-        idx = data->delta_y > 0 ? 3 : 2; // UP : DOWN
+        idx = data->delta_y > 0 ? 3 : 2; // DOWN : UP
         data->delta_y %= cfg->tick;
     }
 
     if (idx != -1) {
-        // Remap rel code
-        // event->code = INPUT_REL_MISC;
-
         struct zmk_behavior_binding_event ev = {
             .position = 12345 + idx,
             .timestamp = k_uptime_get(),
@@ -114,20 +108,21 @@ static int zip_keybind_init(const struct device *dev) {
 #define TRANSFORMED_BINDINGS(n)                                                                    \
     {LISTIFY(DT_INST_PROP_LEN(n, bindings), ZMK_KEYMAP_EXTRACT_BINDING, (, ), DT_DRV_INST(n))}
 
-#define ZIP_KEYBIND_INST(n)                                                                        \
+#define ZIP_KEYBIND_INST(n)                                                              \
     BUILD_ASSERT(DT_INST_PROP_LEN(n, bindings) >= 4, "bindings should have at least 4 elements");  \
-    static struct zip_keybind_data zip_keybind_data_##n = {};                                      \
-    static struct zmk_behavior_binding zip_keybind_config_##n_bindings[] =                         \
+    static struct zmk_behavior_binding zip_keybind_config_##n_bindings[] =               \
         TRANSFORMED_BINDINGS(n);                                                                   \
-    static struct zip_keybind_config zip_keybind_config_##n = {                                    \
-        .bindings = zip_keybind_config_##n_bindings,                                               \
+    static struct zip_keybind_config zip_keybind_config_##n = {                \
+        .bindings = zip_keybind_config_##n_bindings,                                     \
         .type = INPUT_EV_REL,                                                                      \
         .track_remainders = DT_INST_PROP_OR(n, track_remainders, true),                            \
         .tap_ms = DT_INST_PROP_OR(n, tap_ms, 30),                                                  \
         .wait_ms = DT_INST_PROP_OR(n, wait_ms, 15),                                                \
         .tick = DT_INST_PROP_OR(n, tick, 10)};                                                     \
-    DEVICE_DT_INST_DEFINE(n, &zip_keybind_init, NULL, &zip_keybind_data_##n,                       \
-                          &zip_keybind_config_##n, POST_KERNEL,                                    \
+    DEVICE_DT_INST_DEFINE(n, &zip_keybind_init, NULL, &zip_keybind_data_##n,   \
+                          &zip_keybind_config_##n, POST_KERNEL,                          \
                           CONFIG_KERNEL_INIT_PRIORITY_DEFAULT, &sy_driver_api);
 
 DT_INST_FOREACH_STATUS_OKAY(ZIP_KEYBIND_INST)
+
+
