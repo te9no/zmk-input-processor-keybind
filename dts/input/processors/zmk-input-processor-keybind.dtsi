@@ -11,5 +11,8 @@
                   <&kp LEFT>,
                   <&kp UP>,
                   <&kp DOWN>;
+        tick = <10>;
+        wait-ms = <15>;
+        tap-ms = <30>;
     };
 };

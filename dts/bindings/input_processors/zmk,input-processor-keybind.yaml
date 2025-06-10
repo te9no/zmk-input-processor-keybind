@@ -20,3 +20,12 @@ properties:
     description: "Behaviors to be invoked"
     type: phandle-array
     required: true
+  tick:
+    description: "Required ticks to trigger a ball action. Higher values require more movement to trigger a ball action. If omitted, 10 will be used."
+    type: int
+  wait-ms:
+    description: "Time to wait (in milliseconds) before triggering the next behavior binding. If omitted, it will be set to 0."
+    type: int
+  tap-ms:
+    description: "Time to wait (in milliseconds) between the press and release events on a triggered behavior binding. If omitted, it will be set to 0."
+    type: int

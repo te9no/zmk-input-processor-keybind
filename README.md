@@ -1,10 +1,10 @@
-# ZMK Split Input Packet Compression Processor
+# ZMK Input Processor: Keybind
 
-This module is used to quantize X and Y value set to fit inside single payload of pointing device on split peripheral, to reduce the bluetooth connection loading between the peripherals and the central.
+> ⚠️ **Development Notice**  
+> This module is currently under active development and **not yet in a working state**.  
+> Use at your own risk. API and behavior may change significantly.
 
-## What it does
-
-It packs both X and Y axis value set (two `int16_t`) from pointing device driver into one `uint32_t` (as Z axis value code) on split peripheral. Only 8 byte will be transmitted, and then resurrected back into two new X/Y input events on central side. Roughly, shall save up to 50% packet size for one 2D coordination. The compression and decompression are handled in two predefined input prcessor config, `&zip_keybind` & `&zip_zxy`. They should be placed at the ends of chain of processors between central and peripheral.
+A ZMK firmware module that quantizes XY pointer device inputs (like trackballs or touchpads) into discrete keypress events.
 
 ## Installation
 
@@ -15,15 +15,15 @@ manifest:
   remotes:
     #...
     # START #####
-    - name: badjeff
-      url-base: https://github.com/badjeff
+    - name: zettaface
+      url-base: https://github.com/zettaface
     # END #######
     #...
   projects:
     #...
     # START #####
     - name: zmk-input-processor-keybind
-      remote: badjeff
+      remote: zettaface
       revision: main
     # END #######
     #...
@@ -32,36 +32,14 @@ manifest:
 Roughly, `overlay` of the split-peripheral trackball should look like below.
 
 ```
-/* Typical common split inputs node on central and peripheral(s) */
-/{
-  split_inputs {
-    #address-cells = <1>;
-    #size-cells = <0>;
 
-    trackball_split: trackball@0 {
-      compatible = "zmk,input-split";
-      reg = <0>;
-    };
+#include <input/processors/zmk-input-processor-keybind.dtsi>
 
-  };
+&trackball_listener {
+    status = "okay";
+    device = <&trackball>;
+
+    input-processors = <&zip_keybind_keys>;
 };
 
-/* Add the compressor (zip_keybind) on peripheral(s) overlay */
-#include <input/processors/keybind.dtsi>
-&trackball_split {
-  device = <&trackball>;
-  /* append XY-to-Z compressor on transmitting side */
-  input-processors = <&zip_keybind>;
-};
-
-/* Add the decompressor (zip_zxy) on central overlay */
-#include <input/processors/keybind.dtsi>
-tball1_mmv_il {
-  compatible = "zmk,input-listener";
-  device = <&trackball_split>;
-
-  /* preppend Z-to-XY processor on receiving side */
-  input-processors = <&zip_zxy>, <&zip_report_rate_limit 8>;
-  /* NOTE: &zip_report_rate_limit is avaliable at https://github.com/badjeff/zmk-input-processor-report-rate-limit */
-};
 ```
