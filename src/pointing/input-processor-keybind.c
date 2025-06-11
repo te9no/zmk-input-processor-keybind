@@ -31,11 +31,14 @@ struct zip_keybind_config {
     uint32_t tap_ms;
     uint32_t wait_ms;
     uint32_t tick;
+    uint32_t cooldown_ms; // New field for cooldown
 };
 
 struct zip_keybind_data {
     int32_t delta_x;
     int32_t delta_y;
+    int64_t start_time;
+    int64_t last_triggered_time;
 };
 
 static int zip_keybind_handle_event(const struct device *dev, struct input_event *event,
@@ -44,6 +47,11 @@ static int zip_keybind_handle_event(const struct device *dev, struct input_event
     const struct zip_keybind_config *cfg = dev->config;
     struct zip_keybind_data *data = dev->data;
     int32_t value = event->value;
+
+    // 起動から10秒経過するまで処理をスキップ
+    if (k_uptime_get() - data->start_time < 10000) {
+        return ZMK_INPUT_PROC_CONTINUE;
+    }
 
     if (event->type != INPUT_EV_REL) {
         return ZMK_INPUT_PROC_CONTINUE;
@@ -64,13 +72,26 @@ static int zip_keybind_handle_event(const struct device *dev, struct input_event
     int idx = -1;
     if (abs(data->delta_x) >= cfg->tick) {
         idx = data->delta_x > 0 ? 0 : 1; // RIGHT : LEFT
-        data->delta_x %= cfg->tick;
+        if (!cfg->track_remainders) {
+            data->delta_x = 0;
+        } else {
+            data->delta_x %= cfg->tick;
+        }
     } else if (abs(data->delta_y) >= cfg->tick) {
         idx = data->delta_y > 0 ? 3 : 2; // DOWN : UP
-        data->delta_y %= cfg->tick;
+        if (!cfg->track_remainders) {
+            data->delta_y = 0;
+        } else {
+            data->delta_y %= cfg->tick;
+        }
     }
 
     if (idx != -1) {
+        // クールダウン期間中であればトリガーをスキップ
+        if (k_uptime_get() - data->last_triggered_time < cfg->cooldown_ms) {
+            return ZMK_INPUT_PROC_CONTINUE;
+        }
+
         struct zmk_behavior_binding_event ev = {
             .position = 12345 + idx,
             .timestamp = k_uptime_get(),
@@ -86,10 +107,11 @@ static int zip_keybind_handle_event(const struct device *dev, struct input_event
         zmk_behavior_queue_add(&ev, cfg->bindings[idx], true, cfg->tap_ms);
         zmk_behavior_queue_add(&ev, cfg->bindings[idx], false, cfg->wait_ms);
 
+        data->last_triggered_time = k_uptime_get(); // トリガー時刻を更新
         return ZMK_INPUT_PROC_STOP;
     }
 
-    return ZMK_INPUT_PROC_STOP;
+    return ZMK_INPUT_PROC_CONTINUE;
 }
 
 static struct zmk_input_processor_driver_api sy_driver_api = {
@@ -101,6 +123,8 @@ static int zip_keybind_init(const struct device *dev) {
 
     data->delta_x = 0;
     data->delta_y = 0;
+    data->start_time = k_uptime_get();
+    data->last_triggered_time = 0;
 
     return 0;
 }
@@ -109,16 +133,18 @@ static int zip_keybind_init(const struct device *dev) {
     {LISTIFY(DT_INST_PROP_LEN(n, bindings), ZMK_KEYMAP_EXTRACT_BINDING, (, ), DT_DRV_INST(n))}
 
 #define ZIP_KEYBIND_INST(n)                                                              \
-    BUILD_ASSERT(DT_INST_PROP_LEN(n, bindings) >= 4, "bindings should have at least 4 elements");  \
-    static struct zmk_behavior_binding zip_keybind_config_##n_bindings[] =               \
+    static struct zip_keybind_data zip_keybind_data_##n;                                \
+    static struct zmk_behavior_binding zip_bindings_##n[] =               \
         TRANSFORMED_BINDINGS(n);                                                                   \
+    BUILD_ASSERT(DT_INST_PROP_LEN(n, bindings) >= 4, "bindings should have at least 4 elements");  \
     static struct zip_keybind_config zip_keybind_config_##n = {                \
-        .bindings = zip_keybind_config_##n_bindings,                                     \
+        .bindings = zip_bindings_##n,                                     \
         .type = INPUT_EV_REL,                                                                      \
-        .track_remainders = DT_INST_PROP_OR(n, track_remainders, true),                            \
+        .track_remainders = DT_INST_PROP_OR(n, track_remainders, false),    \
         .tap_ms = DT_INST_PROP_OR(n, tap_ms, 30),                                                  \
         .wait_ms = DT_INST_PROP_OR(n, wait_ms, 15),                                                \
-        .tick = DT_INST_PROP_OR(n, tick, 10)};                                                     \
+        .tick = DT_INST_PROP_OR(n, tick, 10),                                                      \
+        .cooldown_ms = DT_INST_PROP_OR(n, cooldown_ms, 50)};           \
     DEVICE_DT_INST_DEFINE(n, &zip_keybind_init, NULL, &zip_keybind_data_##n,   \
                           &zip_keybind_config_##n, POST_KERNEL,                          \
                           CONFIG_KERNEL_INIT_PRIORITY_DEFAULT, &sy_driver_api);
