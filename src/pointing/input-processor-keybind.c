@@ -81,9 +81,15 @@ static void keybind_handle_raw(struct zip_keybind_data *data,
 static void keybind_handle_4way(struct zip_keybind_data *data,
                                 const struct zip_keybind_config *cfg) {
     int32_t movement = approx_hypot(abs(data->last_delta_x), abs(data->last_delta_y));
-    if (data->last_delta_x > data->last_delta_y) {
+    if (abs(data->last_delta_x) > abs(data->last_delta_y)) {
+        if (data->last_delta_x < 0)
+            movement = -movement;
+
         data->delta_x = CLAMP(data->delta_x + movement, -data->max_delta, data->max_delta);
     } else {
+        if (data->last_delta_y < 0)
+            movement = -movement;
+
         data->delta_y = CLAMP(data->delta_y + movement, -data->max_delta, data->max_delta);
     }
 
@@ -102,16 +108,29 @@ static void keybind_handle_8way(struct zip_keybind_data *data,
             CLAMP(data->delta_y + data->last_delta_y, -data->max_delta, data->max_delta);
     } else {
         int32_t movement = approx_hypot(abs(data->last_delta_x), abs(data->last_delta_y));
-        int32_t ratio_xy = data->last_delta_x / data->last_delta_y;
-        int32_t ratio_yx = data->last_delta_y / data->last_delta_x;
+        int32_t ratio_xy = abs(data->last_delta_x / data->last_delta_y);
+        int32_t ratio_yx = abs(data->last_delta_y / data->last_delta_x);
 
         if (ratio_xy >= 2) {
+            if (data->last_delta_x < 0)
+                movement = -movement;
+
             data->delta_x = CLAMP(data->delta_x + movement, -data->max_delta, data->max_delta);
         } else if (ratio_yx >= 2) {
+            if (data->last_delta_y < 0)
+                movement = -movement;
+
             data->delta_y = CLAMP(data->delta_y + movement, -data->max_delta, data->max_delta);
         } else {
-            data->delta_x = CLAMP(data->delta_x + movement, -data->max_delta, data->max_delta);
-            data->delta_y = CLAMP(data->delta_y + movement, -data->max_delta, data->max_delta);
+            if (data->last_delta_x < 0)
+                data->delta_x = CLAMP(data->delta_x - movement, -data->max_delta, data->max_delta);
+            else
+                data->delta_x = CLAMP(data->delta_x + movement, -data->max_delta, data->max_delta);
+
+            if (data->last_delta_y < 0)
+                data->delta_y = CLAMP(data->delta_y - movement, -data->max_delta, data->max_delta);
+            else
+                data->delta_y = CLAMP(data->delta_y + movement, -data->max_delta, data->max_delta);
         }
     }
 
