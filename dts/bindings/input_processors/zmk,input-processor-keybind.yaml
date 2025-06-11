@@ -11,8 +11,9 @@ properties:
   "#input-processor-cells":
     type: int
     const: 0
-  type:
+  mode:
     type: int
+    description: "Determines how trackball motion translates into key events (0: raw movement, 1: 4-way DPad, 2: 8-way DPad). Default is 0."
   track_remainders:
     type: boolean
     description: Track remaining movement

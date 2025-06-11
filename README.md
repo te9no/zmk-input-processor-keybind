@@ -61,6 +61,7 @@ Custom processor example:
         tick = <40>;
         wait-ms = <0>;
         tap-ms = <10>;
+        // mode = <0>
         // threshold = <10>
         // max_threshold = <200>
         // max_pending_activations = <10>
