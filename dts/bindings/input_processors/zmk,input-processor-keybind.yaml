@@ -29,3 +29,12 @@ properties:
   tap-ms:
     description: "Time to wait (in milliseconds) between the press and release events on a triggered behavior binding. If omitted, it will be set to 0."
     type: int
+  threshold:
+    description: "Minimum movement delta required to trigger an activation. Must be a positive integer."
+    type: int
+  max_threshold:
+    description: "Maximum allowed value for threshold. Used to cap sensitivity settings."
+    type: int
+  max_pending_activations:
+    description: "Maximum number of pending activations that can be queued before ignoring further input(per axis)."
+    type: int
