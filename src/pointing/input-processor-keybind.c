@@ -26,6 +26,8 @@ LOG_MODULE_DECLARE(zmk, CONFIG_ZMK_LOG_LEVEL);
 
 struct zip_keybind_config {
     uint8_t index;
+    uint8_t mode;
+
     bool track_remainders;
     const struct zmk_behavior_binding *bindings;
     uint32_t tap_ms;
@@ -66,6 +68,48 @@ static uint32_t approx_hypot(uint32_t a, uint32_t b) {
     return a + ((b * 3) >> 3);
 }
 
+static void keybind_handle_raw(struct zip_keybind_data *data,
+                               const struct zip_keybind_config *cfg) {
+
+    data->delta_x = CLAMP(data->delta_x + data->last_delta_x, -data->max_delta, data->max_delta);
+    data->delta_y = CLAMP(data->delta_y + data->last_delta_y, -data->max_delta, data->max_delta);
+
+    data->last_delta_x = 0;
+    data->last_delta_y = 0;
+}
+
+static void keybind_handle_4way(struct zip_keybind_data *data,
+                                const struct zip_keybind_config *cfg) {
+    int32_t movement = approx_hypot(abs(data->delta_x), abs(data->delta_y));
+    if (data->last_delta_x > data->last_delta_y) {
+        data->delta_x = CLAMP(data->delta_x + movement, -data->max_delta, data->max_delta);
+    } else {
+        data->delta_y = CLAMP(data->delta_y + movement, -data->max_delta, data->max_delta);
+    }
+
+    data->last_delta_x = 0;
+    data->last_delta_y = 0;
+}
+
+static void keybind_handle_8way(struct zip_keybind_data *data,
+                                const struct zip_keybind_config *cfg) {
+    int32_t movement = approx_hypot(abs(data->delta_x), abs(data->delta_y));
+    int32_t ratio_xy = data->last_delta_x / data->last_delta_y;
+    int32_t ratio_yx = data->last_delta_y / data->last_delta_x;
+
+    if (ratio_xy >= 2) {
+        data->delta_x = CLAMP(data->delta_x + movement, -data->max_delta, data->max_delta);
+    } else if (ratio_yx >= 2) {
+        data->delta_y = CLAMP(data->delta_y + movement, -data->max_delta, data->max_delta);
+    } else {
+        data->delta_x = CLAMP(data->delta_x + movement, -data->max_delta, data->max_delta);
+        data->delta_y = CLAMP(data->delta_y + movement, -data->max_delta, data->max_delta);
+    }
+
+    data->last_delta_x = 0;
+    data->last_delta_y = 0;
+}
+
 static int zip_keybind_handle_event(const struct device *dev, struct input_event *event,
                                     uint32_t param1, uint32_t param2,
                                     struct zmk_input_processor_state *state) {
@@ -79,6 +123,10 @@ static int zip_keybind_handle_event(const struct device *dev, struct input_event
 
     LOG_DBG("dev: %d evt: %d val: %d thresh: %d sync: %d dx: %d dy: %d", state->input_device_index,
             event->code, value, cfg->threshold, (int)event->sync, data->delta_x, data->delta_y);
+
+    // cutoff small or very large movements
+    if (cfg->threshold > value || value > cfg->max_threshold)
+        return ZMK_INPUT_PROC_STOP;
 
     // Accumulate movement
     if (event->code == INPUT_REL_X) {
@@ -96,23 +144,22 @@ static int zip_keybind_handle_event(const struct device *dev, struct input_event
     int32_t movement = approx_hypot(abs(data->last_delta_x), abs(data->last_delta_y));
     LOG_DBG("movement: %d th: %d max th: %d", movement, cfg->threshold, cfg->max_threshold);
     // cutoff small or very large movements
-    if (cfg->threshold < movement && movement < cfg->max_threshold) {
-        data->delta_x =
-            CLAMP(data->delta_x + data->last_delta_x, -data->max_delta, data->max_delta);
-        data->delta_y =
-            CLAMP(data->delta_y + data->last_delta_y, -data->max_delta, data->max_delta);
 
-        LOG_DBG("dev: %d dx: %d dy: %d tick: %d", state->input_device_index, data->delta_x,
-                data->delta_y, cfg->tick);
-
-        if (has_pending_movement(data, cfg)) {
-            data->device_index = state->input_device_index;
-            k_work_schedule(&data->press_work, K_MSEC(0));
-        }
+    if (cfg->mode == 0) {
+        keybind_handle_raw(data, cfg);
+    } else if (cfg->mode == 1) {
+        keybind_handle_4way(data, cfg);
+    } else if (cfg->mode == 2) {
+        keybind_handle_8way(data, cfg);
     }
 
-    data->last_delta_x = 0;
-    data->last_delta_y = 0;
+    LOG_DBG("dev: %d dx: %d dy: %d tick: %d", state->input_device_index, data->delta_x,
+            data->delta_y, cfg->tick);
+
+    if (has_pending_movement(data, cfg)) {
+        data->device_index = state->input_device_index;
+        k_work_schedule(&data->press_work, K_NO_WAIT);
+    }
 
     return ZMK_INPUT_PROC_STOP;
 }
@@ -225,6 +272,11 @@ static void press_work_cb(struct k_work *work) {
         if (cfg->wait_ms > 0)
             k_sleep(K_MSEC(cfg->wait_ms));
     }
+
+    if (!cfg->track_remainders) {
+        data->delta_x = 0;
+        data->delta_y = 0;
+    }
 }
 
 static struct zmk_input_processor_driver_api zip_keybind_driver_api = {
@@ -255,8 +307,9 @@ static int zip_keybind_init(const struct device *dev) {
         TRANSFORMED_BINDINGS(n);                                                                   \
     static struct zip_keybind_config zip_keybind_config_##n = {                                    \
         .index = n,                                                                                \
+        .mode = DT_INST_PROP_OR(n, mode, 0),                                                       \
         .bindings = zip_keybind_config_bindings_##n,                                               \
-        .track_remainders = DT_INST_PROP_OR(n, track_remainders, true),                            \
+        .track_remainders = DT_INST_PROP_OR(n, track_remainders, false),                           \
         .tap_ms = DT_INST_PROP_OR(n, tap_ms, 40),                                                  \
         .wait_ms = DT_INST_PROP_OR(n, wait_ms, 0),                                                 \
         .tick = DT_INST_PROP_OR(n, tick, 10),                                                      \
