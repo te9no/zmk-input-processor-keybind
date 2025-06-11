@@ -153,7 +153,7 @@ static int zip_keybind_handle_event(const struct device *dev, struct input_event
             event->code, value, cfg->threshold, (int)event->sync, data->delta_x, data->delta_y);
 
     // cutoff small or very large movements
-    if (cfg->threshold > value || value > cfg->max_threshold)
+    if (cfg->threshold > abs(value) || abs(value) > cfg->max_threshold)
         return ZMK_INPUT_PROC_STOP;
 
     // Accumulate movement
