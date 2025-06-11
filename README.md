@@ -52,7 +52,6 @@ Custom processor example:
     zip_keybind_keys: zip_keybind_keys {
         compatible = "zmk,input-processor-keybind";
         #input-processor-cells = <0>;
-        type = <INPUT_EV_REL>;
         track_remainders;
         bindings = <&kp RIGHT>,
                   <&kp LEFT>,
