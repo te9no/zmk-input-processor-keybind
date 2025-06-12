@@ -337,10 +337,10 @@ static int zip_keybind_init(const struct device *dev) {
         .mode = DT_INST_PROP_OR(n, mode, 0),                                                       \
         .bindings = zip_keybind_config_bindings_##n,                                               \
         .track_remainders = DT_INST_PROP_OR(n, track_remainders, false),                           \
-        .tap_ms = DT_INST_PROP_OR(n, tap_ms, 40),                                                  \
+        .tap_ms = DT_INST_PROP_OR(n, tap_ms, 20),                                                  \
         .wait_ms = DT_INST_PROP_OR(n, wait_ms, 0),                                                 \
         .tick = DT_INST_PROP_OR(n, tick, 10),                                                      \
-        .threshold = DT_INST_PROP_OR(n, threshold, 10),                                            \
+        .threshold = DT_INST_PROP_OR(n, threshold, 1),                                            \
         .max_threshold = DT_INST_PROP_OR(n, max_threshold, 200),                                   \
         .max_pending_activations = DT_INST_PROP_OR(n, max_pending_activations, 5)};                \
     DEVICE_DT_INST_DEFINE(n, &zip_keybind_init, NULL, &zip_keybind_data_##n,                       \
