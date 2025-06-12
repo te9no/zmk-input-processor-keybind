@@ -99,38 +99,33 @@ static void keybind_handle_4way(struct zip_keybind_data *data,
 
 static void keybind_handle_8way(struct zip_keybind_data *data,
                                 const struct zip_keybind_config *cfg) {
+    int32_t dx = data->last_delta_x;
+    int32_t dy = data->last_delta_y;
+    int32_t adx = abs(dx);
+    int32_t ady = abs(dy);
 
-    if (data->last_delta_y == 0) {
-        data->delta_x =
-            CLAMP(data->delta_x + data->last_delta_x, -data->max_delta, data->max_delta);
-    } else if (data->last_delta_x == 0) {
-        data->delta_y =
-            CLAMP(data->delta_y + data->last_delta_y, -data->max_delta, data->max_delta);
+    if (dy == 0) {
+        data->delta_x = CLAMP(data->delta_x + dx, -data->max_delta, data->max_delta);
+    } else if (dx == 0) {
+        data->delta_y = CLAMP(data->delta_y + dy, -data->max_delta, data->max_delta);
     } else {
-        int32_t movement = approx_hypot(abs(data->last_delta_x), abs(data->last_delta_y));
-        int32_t ratio_xy = abs(data->last_delta_x / data->last_delta_y);
-        int32_t ratio_yx = abs(data->last_delta_y / data->last_delta_x);
+        int32_t movement = approx_hypot(adx, ady);
 
-        if (ratio_xy >= 2) {
-            if (data->last_delta_x < 0)
-                movement = -movement;
-
-            data->delta_x = CLAMP(data->delta_x + movement, -data->max_delta, data->max_delta);
-        } else if (ratio_yx >= 2) {
-            if (data->last_delta_y < 0)
-                movement = -movement;
-
-            data->delta_y = CLAMP(data->delta_y + movement, -data->max_delta, data->max_delta);
+        // check tan for 22.5° sector, which is approx. 5/12
+        if (5 * adx > 12 * ady) {
+            // horizontal movement (±22.5°)
+            data->delta_x = CLAMP(data->delta_x + (dx < 0 ? -movement : movement), -data->max_delta,
+                                  data->max_delta);
+        } else if (5 * ady > 12 * adx) {
+            // vertival movement (±22.5°)
+            data->delta_y = CLAMP(data->delta_y + (dy < 0 ? -movement : movement), -data->max_delta,
+                                  data->max_delta);
         } else {
-            if (data->last_delta_x < 0)
-                data->delta_x = CLAMP(data->delta_x - movement, -data->max_delta, data->max_delta);
-            else
-                data->delta_x = CLAMP(data->delta_x + movement, -data->max_delta, data->max_delta);
-
-            if (data->last_delta_y < 0)
-                data->delta_y = CLAMP(data->delta_y - movement, -data->max_delta, data->max_delta);
-            else
-                data->delta_y = CLAMP(data->delta_y + movement, -data->max_delta, data->max_delta);
+            // diagonals
+            int32_t delta_x = (dx < 0) ? -movement : movement;
+            int32_t delta_y = (dy < 0) ? -movement : movement;
+            data->delta_x = CLAMP(data->delta_x + delta_x, -data->max_delta, data->max_delta);
+            data->delta_y = CLAMP(data->delta_y + delta_y, -data->max_delta, data->max_delta);
         }
     }
 
@@ -207,6 +202,10 @@ static int exec_one_binding(const struct zip_keybind_data *data,
 #endif
     };
 
+    LOG_DBG("trigger binding: bh: %s 0x%02x 0x%02x tap: %d ms hold %d ms",
+            cfg->bindings[idx].behavior_dev, cfg->bindings[idx].param1, cfg->bindings[idx].param2,
+            cfg->tap_ms, cfg->wait_ms);
+
     int ret = zmk_behavior_invoke_binding(&cfg->bindings[idx], behavior_event, true);
     if (ret < 0) {
         return ret;
@@ -281,10 +280,10 @@ static void press_work_cb(struct k_work *work) {
 
         if (abs(data->delta_y) >= cfg->tick) {
             if (data->delta_y > 0) { // UP
-                idx = 3;
+                idy = 3;
                 data->delta_y -= cfg->tick;
             } else { // DOWN
-                idx = 2;
+                idy = 2;
                 data->delta_y += cfg->tick;
             }
         }
