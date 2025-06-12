@@ -81,7 +81,8 @@ Custom processor example:
   How input translates to key events:
   - `0` = Raw direct movement
   - `1` = 4-directional (up/down/left/right) 
-  - `2` = 8-directional (includes diagonals)
+  - `2` = 8-directional (includes diagonals) 
+    *Example: Diagonal movement (up+right) will press both up and right keys simultaneously*
 - **`track_remainders`** *(boolean, default: false)*  
   When enabled, saves partial movement between activations
 - **`threshold`** *(int, default: 1)*  
