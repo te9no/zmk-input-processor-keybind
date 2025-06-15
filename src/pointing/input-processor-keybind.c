@@ -25,21 +25,113 @@
 LOG_MODULE_DECLARE(zmk, CONFIG_ZMK_LOG_LEVEL);
 
 struct zip_keybind_config {
-    uint8_t type;
+    uint8_t index;
+    uint8_t mode;
+
     bool track_remainders;
     const struct zmk_behavior_binding *bindings;
     uint32_t tap_ms;
     uint32_t wait_ms;
     uint32_t tick;
-    uint32_t cooldown_ms; // New field for cooldown
+
+    int32_t threshold;
+    int32_t max_threshold;
+
+    int32_t max_pending_activations;
 };
 
 struct zip_keybind_data {
     int32_t delta_x;
     int32_t delta_y;
-    int64_t start_time;
-    int64_t last_triggered_time;
+
+    int32_t last_delta_x;
+    int32_t last_delta_y;
+
+    int32_t max_delta;
+    uint8_t device_index;
+
+    const struct device *dev;
+    struct k_work_delayable press_work;
 };
+
+static inline bool has_pending_movement(const struct zip_keybind_data *data,
+                                        const struct zip_keybind_config *cfg) {
+    return abs(data->delta_x) >= cfg->tick || abs(data->delta_y) >= cfg->tick;
+}
+
+static uint32_t approx_hypot(uint32_t a, uint32_t b) {
+    if (a < b) {
+        unsigned int tmp = a;
+        a = b;
+        b = tmp;
+    }
+    return a + ((b * 3) >> 3);
+}
+
+static void keybind_handle_raw(struct zip_keybind_data *data,
+                               const struct zip_keybind_config *cfg) {
+
+    data->delta_x = CLAMP(data->delta_x + data->last_delta_x, -data->max_delta, data->max_delta);
+    data->delta_y = CLAMP(data->delta_y + data->last_delta_y, -data->max_delta, data->max_delta);
+
+    data->last_delta_x = 0;
+    data->last_delta_y = 0;
+}
+
+static void keybind_handle_4way(struct zip_keybind_data *data,
+                                const struct zip_keybind_config *cfg) {
+    int32_t movement = approx_hypot(abs(data->last_delta_x), abs(data->last_delta_y));
+    if (abs(data->last_delta_x) > abs(data->last_delta_y)) {
+        if (data->last_delta_x < 0)
+            movement = -movement;
+
+        data->delta_x = CLAMP(data->delta_x + movement, -data->max_delta, data->max_delta);
+    } else {
+        if (data->last_delta_y < 0)
+            movement = -movement;
+
+        data->delta_y = CLAMP(data->delta_y + movement, -data->max_delta, data->max_delta);
+    }
+
+    data->last_delta_x = 0;
+    data->last_delta_y = 0;
+}
+
+static void keybind_handle_8way(struct zip_keybind_data *data,
+                                const struct zip_keybind_config *cfg) {
+    int32_t dx = data->last_delta_x;
+    int32_t dy = data->last_delta_y;
+    int32_t adx = abs(dx);
+    int32_t ady = abs(dy);
+
+    if (dy == 0) {
+        data->delta_x = CLAMP(data->delta_x + dx, -data->max_delta, data->max_delta);
+    } else if (dx == 0) {
+        data->delta_y = CLAMP(data->delta_y + dy, -data->max_delta, data->max_delta);
+    } else {
+        int32_t movement = approx_hypot(adx, ady);
+
+        // check tan for 22.5° sector, which is approx. 5/12
+        if (5 * adx > 12 * ady) {
+            // horizontal movement (±22.5°)
+            data->delta_x = CLAMP(data->delta_x + (dx < 0 ? -movement : movement), -data->max_delta,
+                                  data->max_delta);
+        } else if (5 * ady > 12 * adx) {
+            // vertival movement (±22.5°)
+            data->delta_y = CLAMP(data->delta_y + (dy < 0 ? -movement : movement), -data->max_delta,
+                                  data->max_delta);
+        } else {
+            // diagonals
+            int32_t delta_x = (dx < 0) ? -movement : movement;
+            int32_t delta_y = (dy < 0) ? -movement : movement;
+            data->delta_x = CLAMP(data->delta_x + delta_x, -data->max_delta, data->max_delta);
+            data->delta_y = CLAMP(data->delta_y + delta_y, -data->max_delta, data->max_delta);
+        }
+    }
+
+    data->last_delta_x = 0;
+    data->last_delta_y = 0;
+}
 
 static int zip_keybind_handle_event(const struct device *dev, struct input_event *event,
                                     uint32_t param1, uint32_t param2,
@@ -57,98 +149,207 @@ static int zip_keybind_handle_event(const struct device *dev, struct input_event
         return ZMK_INPUT_PROC_CONTINUE;
     }
 
-    // 動きを蓄積
+    LOG_DBG("dev: %d evt: %d val: %d thresh: %d sync: %d dx: %d dy: %d", state->input_device_index,
+            event->code, value, cfg->threshold, (int)event->sync, data->delta_x, data->delta_y);
+
+    // cutoff small or very large movements
+    if (cfg->threshold > abs(value) || abs(value) > cfg->max_threshold)
+        return ZMK_INPUT_PROC_STOP;
+
+    // Accumulate movement
     if (event->code == INPUT_REL_X) {
-        data->delta_x += value;
+        data->last_delta_x = value;
     } else if (event->code == INPUT_REL_Y) {
-        data->delta_y += value;
+        data->last_delta_y = value;
     } else {
         return ZMK_INPUT_PROC_CONTINUE;
     }
 
-    LOG_DBG("dx: %d (%d) dy: %d (%d) tick: %d", data->delta_x, abs(data->delta_x), data->delta_y,
-            abs(data->delta_y), cfg->tick);
-
-    int idx = -1;
-    if (abs(data->delta_x) >= cfg->tick) {
-        idx = data->delta_x > 0 ? 0 : 1; // RIGHT : LEFT
-        if (!cfg->track_remainders) {
-            data->delta_x = 0;
-        } else {
-            data->delta_x %= cfg->tick;
-        }
-    } else if (abs(data->delta_y) >= cfg->tick) {
-        idx = data->delta_y > 0 ? 3 : 2; // DOWN : UP
-        if (!cfg->track_remainders) {
-            data->delta_y = 0;
-        } else {
-            data->delta_y %= cfg->tick;
-        }
-    }
-
-    if (idx != -1) {
-        // クールダウン期間中であればトリガーをスキップ
-        if (k_uptime_get() - data->last_triggered_time < cfg->cooldown_ms) {
-            return ZMK_INPUT_PROC_CONTINUE;
-        }
-
-        struct zmk_behavior_binding_event ev = {
-            .position = 12345 + idx,
-            .timestamp = k_uptime_get(),
-#if IS_ENABLED(CONFIG_ZMK_SPLIT)
-            .source = ZMK_POSITION_STATE_CHANGE_SOURCE_LOCAL,
-#endif
-        };
-
-        LOG_DBG("trigger binding: %s 0x%02x 0x%02x tap: %d ms hold %d ms",
-                cfg->bindings[idx].behavior_dev, cfg->bindings[idx].param1,
-                cfg->bindings[idx].param2, cfg->tap_ms, cfg->wait_ms);
-
-        zmk_behavior_queue_add(&ev, cfg->bindings[idx], true, cfg->tap_ms);
-        zmk_behavior_queue_add(&ev, cfg->bindings[idx], false, cfg->wait_ms);
-
-        data->last_triggered_time = k_uptime_get(); // トリガー時刻を更新
+    // wait until full movement readed
+    if (!event->sync)
         return ZMK_INPUT_PROC_STOP;
+
+    int32_t movement = approx_hypot(abs(data->last_delta_x), abs(data->last_delta_y));
+    LOG_DBG("movement: %d th: %d max th: %d", movement, cfg->threshold, cfg->max_threshold);
+    // cutoff small or very large movements
+
+    if (cfg->mode == 0) {
+        keybind_handle_raw(data, cfg);
+    } else if (cfg->mode == 1) {
+        keybind_handle_4way(data, cfg);
+    } else if (cfg->mode == 2) {
+        keybind_handle_8way(data, cfg);
     }
 
-    return ZMK_INPUT_PROC_CONTINUE;
+    LOG_DBG("dev: %d dx: %d dy: %d tick: %d", state->input_device_index, data->delta_x,
+            data->delta_y, cfg->tick);
+
+    if (has_pending_movement(data, cfg)) {
+        data->device_index = state->input_device_index;
+        k_work_schedule(&data->press_work, K_NO_WAIT);
+    }
+
+    return ZMK_INPUT_PROC_STOP;
 }
 
-static struct zmk_input_processor_driver_api sy_driver_api = {
+static inline uint32_t get_position(const struct zip_keybind_data *data,
+                                    const struct zip_keybind_config *cfg) {
+    return ZMK_VIRTUAL_KEY_POSITION_BEHAVIOR_INPUT_PROCESSOR(data->device_index, cfg->index);
+}
+
+static int exec_one_binding(const struct zip_keybind_data *data,
+                            const struct zip_keybind_config *cfg, int idx) {
+    struct zmk_behavior_binding_event behavior_event = {
+        .position = get_position(data, cfg),
+        .timestamp = k_uptime_get(),
+#if IS_ENABLED(CONFIG_ZMK_SPLIT)
+        .source = ZMK_POSITION_STATE_CHANGE_SOURCE_LOCAL,
+#endif
+    };
+
+    LOG_DBG("trigger binding: bh: %s 0x%02x 0x%02x tap: %d ms hold %d ms",
+            cfg->bindings[idx].behavior_dev, cfg->bindings[idx].param1, cfg->bindings[idx].param2,
+            cfg->tap_ms, cfg->wait_ms);
+
+    int ret = zmk_behavior_invoke_binding(&cfg->bindings[idx], behavior_event, true);
+    if (ret < 0) {
+        return ret;
+    }
+
+    if (cfg->tap_ms > 0)
+        k_sleep(K_MSEC(cfg->tap_ms));
+    behavior_event.timestamp = k_uptime_get();
+
+    ret = zmk_behavior_invoke_binding(&cfg->bindings[idx], behavior_event, false);
+    if (ret < 0) {
+        return ret;
+    }
+
+    return 0;
+}
+
+static int exec_two_bindings(const struct zip_keybind_data *data,
+                             const struct zip_keybind_config *cfg, int idx, int idy) {
+    struct zmk_behavior_binding_event behavior_event = {
+        .position =
+            ZMK_VIRTUAL_KEY_POSITION_BEHAVIOR_INPUT_PROCESSOR(data->device_index, cfg->index),
+        .timestamp = k_uptime_get(),
+#if IS_ENABLED(CONFIG_ZMK_SPLIT)
+        .source = ZMK_POSITION_STATE_CHANGE_SOURCE_LOCAL,
+#endif
+    };
+
+    LOG_DBG("trigger binding: bh: %s 0x%02x 0x%02x tap: %d ms hold %d ms",
+            cfg->bindings[idx].behavior_dev, cfg->bindings[idx].param1, cfg->bindings[idx].param2,
+            cfg->tap_ms, cfg->wait_ms);
+
+    int ret = zmk_behavior_invoke_binding(&cfg->bindings[idx], behavior_event, true);
+    if (ret < 0) {
+        return ret;
+    }
+
+    // mutual tap delay will be handled inside
+    ret = exec_one_binding(data, cfg, idy);
+    if (ret < 0) {
+        return ret;
+    }
+
+    behavior_event.timestamp = k_uptime_get();
+    ret = zmk_behavior_invoke_binding(&cfg->bindings[idx], behavior_event, false);
+    if (ret < 0) {
+        return ret;
+    }
+
+    return 0;
+}
+
+static void press_work_cb(struct k_work *work) {
+    struct k_work_delayable *d_work = k_work_delayable_from_work(work);
+    struct zip_keybind_data *data = CONTAINER_OF(d_work, struct zip_keybind_data, press_work);
+    const struct device *dev = data->dev;
+    const struct zip_keybind_config *cfg = dev->config;
+
+    while (has_pending_movement(data, cfg)) {
+        int idx = -1;
+        int idy = -1;
+
+        if (abs(data->delta_x) >= cfg->tick) {
+            if (data->delta_x > 0) { // RIGHT
+                idx = 0;
+                data->delta_x -= cfg->tick;
+            } else { // LEFT
+                idx = 1;
+                data->delta_x += cfg->tick;
+            }
+        }
+
+        if (abs(data->delta_y) >= cfg->tick) {
+            if (data->delta_y > 0) { // UP
+                idy = 3;
+                data->delta_y -= cfg->tick;
+            } else { // DOWN
+                idy = 2;
+                data->delta_y += cfg->tick;
+            }
+        }
+
+        if (idx >= 0 && idy >= 0) {
+            exec_two_bindings(data, cfg, idx, idy);
+        } else if (idx >= 0) {
+            exec_one_binding(data, cfg, idx);
+        } else if (idy >= 0) {
+            exec_one_binding(data, cfg, idy);
+        }
+
+        if (cfg->wait_ms > 0)
+            k_sleep(K_MSEC(cfg->wait_ms));
+    }
+
+    if (!cfg->track_remainders) {
+        data->delta_x = 0;
+        data->delta_y = 0;
+    }
+}
+
+static struct zmk_input_processor_driver_api zip_keybind_driver_api = {
     .handle_event = zip_keybind_handle_event,
 };
 
 static int zip_keybind_init(const struct device *dev) {
     struct zip_keybind_data *data = dev->data;
+    const struct zip_keybind_config *cfg = dev->config;
 
-    data->delta_x = 0;
-    data->delta_y = 0;
-    data->start_time = k_uptime_get();
-    data->last_triggered_time = 0;
+    data->dev = dev;
+    data->max_delta = cfg->max_pending_activations * cfg->tick;
 
+    k_work_init_delayable(&data->press_work, press_work_cb);
     return 0;
 }
 
 #define TRANSFORMED_BINDINGS(n)                                                                    \
     {LISTIFY(DT_INST_PROP_LEN(n, bindings), ZMK_KEYMAP_EXTRACT_BINDING, (, ), DT_DRV_INST(n))}
 
-#define ZIP_KEYBIND_INST(n)                                                              \
-    static struct zip_keybind_data zip_keybind_data_##n;                                \
-    static struct zmk_behavior_binding zip_bindings_##n[] =               \
-        TRANSFORMED_BINDINGS(n);                                                                   \
+#define ZIP_KEYBIND_INST(n)                                                                        \
     BUILD_ASSERT(DT_INST_PROP_LEN(n, bindings) >= 4, "bindings should have at least 4 elements");  \
-    static struct zip_keybind_config zip_keybind_config_##n = {                \
-        .bindings = zip_bindings_##n,                                     \
-        .type = INPUT_EV_REL,                                                                      \
-        .track_remainders = DT_INST_PROP_OR(n, track_remainders, false),    \
-        .tap_ms = DT_INST_PROP_OR(n, tap_ms, 30),                                                  \
-        .wait_ms = DT_INST_PROP_OR(n, wait_ms, 15),                                                \
+    static struct zip_keybind_data zip_keybind_data_##n = {                                        \
+        .delta_x = 0,                                                                              \
+        .delta_y = 0,                                                                              \
+    };                                                                                             \
+    static struct zmk_behavior_binding zip_keybind_config_bindings_##n[] =                         \
+        TRANSFORMED_BINDINGS(n);                                                                   \
+    static struct zip_keybind_config zip_keybind_config_##n = {                                    \
+        .index = n,                                                                                \
+        .mode = DT_INST_PROP_OR(n, mode, 0),                                                       \
+        .bindings = zip_keybind_config_bindings_##n,                                               \
+        .track_remainders = DT_INST_PROP_OR(n, track_remainders, false),                           \
+        .tap_ms = DT_INST_PROP_OR(n, tap_ms, 20),                                                  \
+        .wait_ms = DT_INST_PROP_OR(n, wait_ms, 0),                                                 \
         .tick = DT_INST_PROP_OR(n, tick, 10),                                                      \
-        .cooldown_ms = DT_INST_PROP_OR(n, cooldown_ms, 50)};           \
-    DEVICE_DT_INST_DEFINE(n, &zip_keybind_init, NULL, &zip_keybind_data_##n,   \
-                          &zip_keybind_config_##n, POST_KERNEL,                          \
-                          CONFIG_KERNEL_INIT_PRIORITY_DEFAULT, &sy_driver_api);
+        .threshold = DT_INST_PROP_OR(n, threshold, 1),                                            \
+        .max_threshold = DT_INST_PROP_OR(n, max_threshold, 200),                                   \
+        .max_pending_activations = DT_INST_PROP_OR(n, max_pending_activations, 5)};                \
+    DEVICE_DT_INST_DEFINE(n, &zip_keybind_init, NULL, &zip_keybind_data_##n,                       \
+                          &zip_keybind_config_##n, POST_KERNEL,                                    \
+                          CONFIG_KERNEL_INIT_PRIORITY_DEFAULT, &zip_keybind_driver_api);
 
 DT_INST_FOREACH_STATUS_OKAY(ZIP_KEYBIND_INST)
-
-
