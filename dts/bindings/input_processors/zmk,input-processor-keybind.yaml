@@ -11,8 +11,9 @@ properties:
   "#input-processor-cells":
     type: int
     const: 0
-  type:
+  mode:
     type: int
+    description: "Determines how trackball motion translates into key events (0: raw movement, 1: 4-way DPad, 2: 8-way DPad). Default is 0."
   track_remainders:
     type: boolean
     description: Track remaining movement
@@ -28,4 +29,13 @@ properties:
     type: int
   tap-ms:
     description: "Time to wait (in milliseconds) between the press and release events on a triggered behavior binding. If omitted, it will be set to 0."
+    type: int
+  threshold:
+    description: "Minimum movement delta required to trigger an activation. Must be a positive integer."
+    type: int
+  max_threshold:
+    description: "Maximum allowed value for threshold. Used to cap sensitivity settings."
+    type: int
+  max_pending_activations:
+    description: "Maximum number of pending activations that can be queued before ignoring further input(per axis)."
     type: int
