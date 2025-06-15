@@ -1,30 +1,15 @@
+# Copyright (c) 2023 The ZMK Contributors
+# SPDX-License-Identifier: MIT
+
+if ZMK_POINTING
+
 config ZMK_INPUT_PROCESSOR_KEYBIND
-    bool "Direction Keybind Input Processor"
-    default n
-    help
-        Enable the direction keybind input processor.
+    bool "Split Payload Compression Input Processor"
+    default y
+    depends on DT_HAS_ZMK_INPUT_PROCESSOR_KEYBIND_ENABLED
 
-        This input processor converts relative XY movements into direction key presses.
+config ZMK_INPUT_PROCESSOR_KEYBIND_CODES_MAX_LEN
+    int "Maximum codes length"
+    default 4
 
-config ZMK_INPUT_PROCESSOR_KEYBIND_TAP_MS
-    int "Tap Milliseconds"
-    default 30
-    depends on ZMK_INPUT_PROCESSOR_KEYBIND
-    help
-        The tap duration in milliseconds for the generated key presses.
-
-config ZMK_INPUT_PROCESSOR_KEYBIND_WAIT_MS
-    int "Wait Milliseconds"
-    default 15
-    depends on ZMK_INPUT_PROCESSOR_KEYBIND
-    help
-        The wait duration in milliseconds after the key press.
-
-config ZMK_INPUT_PROCESSOR_KEYBIND_TICK
-    int "Tick Threshold"
-    default 10
-    depends on ZMK_INPUT_PROCESSOR_KEYBIND
-    help
-        The movement threshold (in units) before a key press is triggered.
-
-
+endif

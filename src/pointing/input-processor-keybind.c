@@ -140,11 +140,6 @@ static int zip_keybind_handle_event(const struct device *dev, struct input_event
     struct zip_keybind_data *data = dev->data;
     int32_t value = event->value;
 
-    // 起動から10秒経過するまで処理をスキップ
-    if (k_uptime_get() - data->start_time < 10000) {
-        return ZMK_INPUT_PROC_CONTINUE;
-    }
-
     if (event->type != INPUT_EV_REL) {
         return ZMK_INPUT_PROC_CONTINUE;
     }
