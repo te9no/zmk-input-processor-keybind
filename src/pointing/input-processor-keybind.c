@@ -220,7 +220,7 @@ static int exec_one_binding(const struct zip_keybind_data *data,
         return ret;
     }
 
-    return 0;
+    return ZMK_INPUT_PROC_STOP;
 }
 
 static int exec_two_bindings(const struct zip_keybind_data *data,
