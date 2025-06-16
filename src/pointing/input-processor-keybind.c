@@ -151,14 +151,14 @@ static int zip_keybind_handle_event(const struct device *dev, struct input_event
     if (cfg->threshold > abs(value) || abs(value) > cfg->max_threshold)
         return ZMK_INPUT_PROC_STOP;
 
-    // // Accumulate movement
-    // if (event->code == INPUT_REL_X) {
-    //     data->last_delta_x = value;
-    // } else if (event->code == INPUT_REL_Y) {
-    //     data->last_delta_y = value;
-    // } else {
-    //     return ZMK_INPUT_PROC_CONTINUE;
-    // }
+    // Accumulate movement
+    if (event->code == INPUT_REL_X) {
+        data->last_delta_x = value;
+    } else if (event->code == INPUT_REL_Y) {
+        data->last_delta_y = value;
+    } else {
+        return ZMK_INPUT_PROC_CONTINUE;
+    }
 
     // wait until full movement readed
     if (!event->sync)
