@@ -154,8 +154,10 @@ static int zip_keybind_handle_event(const struct device *dev, struct input_event
     // Accumulate movement
     if (event->code == INPUT_REL_X) {
         data->last_delta_x = value;
+        return ZMK_INPUT_PROC_STOP;
     } else if (event->code == INPUT_REL_Y) {
         data->last_delta_y = value;
+        return ZMK_INPUT_PROC_STOP;
     } else {
         return ZMK_INPUT_PROC_CONTINUE;
     }
