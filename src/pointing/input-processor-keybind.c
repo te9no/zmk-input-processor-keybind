@@ -154,10 +154,8 @@ static int zip_keybind_handle_event(const struct device *dev, struct input_event
     // Accumulate movement
     if (event->code == INPUT_REL_X) {
         data->last_delta_x = value;
-        return ZMK_INPUT_PROC_STOP;
     } else if (event->code == INPUT_REL_Y) {
         data->last_delta_y = value;
-        return ZMK_INPUT_PROC_STOP;
     } else {
         return ZMK_INPUT_PROC_CONTINUE;
     }
@@ -257,7 +255,7 @@ static int exec_two_bindings(const struct zip_keybind_data *data,
         return ret;
     }
 
-    return 0;
+    return ZMK_INPUT_PROC_STOP;
 }
 
 static void press_work_cb(struct k_work *work) {
