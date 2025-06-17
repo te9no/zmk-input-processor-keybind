@@ -143,21 +143,30 @@ static int zip_keybind_handle_event(const struct device *dev, struct input_event
     if (event->type != INPUT_EV_REL) {
         return ZMK_INPUT_PROC_CONTINUE;
     }
+    
+    // Block all mouse cursor movement events
+    if (event->code == INPUT_REL_X || event->code == INPUT_REL_Y) {
+        // Continue processing for keybind conversion but stop original mouse movement
+    } else {
+        return ZMK_INPUT_PROC_CONTINUE;
+    }
 
     LOG_DBG("dev: %d evt: %d val: %d thresh: %d sync: %d dx: %d dy: %d", state->input_device_index,
             event->code, value, cfg->threshold, (int)event->sync, data->delta_x, data->delta_y);
 
-    // cutoff small or very large movements
-    if (cfg->threshold > abs(value) || abs(value) > cfg->max_threshold)
-        return ZMK_INPUT_PROC_STOP;
-
-    // Accumulate movement
+    // Accumulate movement for X and Y events
     if (event->code == INPUT_REL_X) {
         data->last_delta_x = value;
     } else if (event->code == INPUT_REL_Y) {
         data->last_delta_y = value;
     } else {
         return ZMK_INPUT_PROC_CONTINUE;
+    }
+
+    // cutoff small or very large movements but still block the original event
+    if (cfg->threshold > abs(value) || abs(value) > cfg->max_threshold) {
+        // Block the mouse movement but don't process as keybind
+        return ZMK_INPUT_PROC_STOP;
     }
 
     // wait until full movement readed
