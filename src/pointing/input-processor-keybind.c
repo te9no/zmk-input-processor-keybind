@@ -142,7 +142,7 @@ static int zip_keybind_handle_event(const struct device *dev, struct input_event
 
     // Only process relative input events (mouse movement)
     if (event->type != INPUT_EV_REL) {
-        LOF_INF("Only process relative input events: dev: %d type: %d code: %d value: %d",
+        LOG_INF("Only process relative input events: dev: %d type: %d code: %d value: %d",
                 state->input_device_index, event->type, event->code, value);
         return ZMK_INPUT_PROC_CONTINUE;
     }
