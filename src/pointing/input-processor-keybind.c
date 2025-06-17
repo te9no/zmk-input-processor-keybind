@@ -142,11 +142,15 @@ static int zip_keybind_handle_event(const struct device *dev, struct input_event
 
     // Only process relative input events (mouse movement)
     if (event->type != INPUT_EV_REL) {
+        LOF_INF("Only process relative input events: dev: %d type: %d code: %d value: %d",
+                state->input_device_index, event->type, event->code, value);
         return ZMK_INPUT_PROC_CONTINUE;
     }
     
-    // Only process X/Y movement events, block everything else
+    // Only process X/Y movement events, let other events continue
     if (event->code != INPUT_REL_X && event->code != INPUT_REL_Y) {
+        LOG_INF("Only process X/Y movement events: dev: %d code: %d value: %d", state->input_device_index,
+                event->code, value);
         return ZMK_INPUT_PROC_CONTINUE;
     }
 
@@ -162,11 +166,15 @@ static int zip_keybind_handle_event(const struct device *dev, struct input_event
 
     // Skip processing if movement is too small or too large, but still block the event
     if (cfg->threshold > abs(value) || abs(value) > cfg->max_threshold) {
+        LOG_INF("Skipping event: dev: %d code: %d value: %d threshold: %d max_threshold: %d",
+                state->input_device_index, event->code, value, cfg->threshold, cfg->max_threshold);
         return ZMK_INPUT_PROC_STOP;
     }
 
     // wait until full movement readed
     if (!event->sync)
+        LOG_INF("Skipping event2: dev: %d code: %d value: %d sync: %d",
+                state->input_device_index, event->code, value, (int)event->sync);
         return ZMK_INPUT_PROC_STOP;
 
     int32_t movement = approx_hypot(abs(data->last_delta_x), abs(data->last_delta_y));
