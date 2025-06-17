@@ -269,7 +269,12 @@ static void press_work_cb(struct k_work *work) {
     const struct device *dev = data->dev;
     const struct zip_keybind_config *cfg = dev->config;
 
-    while (has_pending_movement(data, cfg)) {
+    // Prevent infinite loops with a maximum iteration limit
+    int max_iterations = cfg->max_pending_activations * 2;
+    int iteration_count = 0;
+
+    while (has_pending_movement(data, cfg) && iteration_count < max_iterations) {
+        iteration_count++;
         int idx = -1;
         int idy = -1;
 
@@ -299,10 +304,23 @@ static void press_work_cb(struct k_work *work) {
             exec_one_binding(data, cfg, idx);
         } else if (idy >= 0) {
             exec_one_binding(data, cfg, idy);
+        } else {
+            // Emergency exit if no movement processed - clear remaining deltas
+            LOG_WRN("No movement processed but pending detected - clearing deltas");
+            data->delta_x = 0;
+            data->delta_y = 0;
+            break;
         }
 
         if (cfg->wait_ms > 0)
             k_sleep(K_MSEC(cfg->wait_ms));
+    }
+
+    // Warn if we hit the iteration limit
+    if (iteration_count >= max_iterations) {
+        LOG_WRN("Hit maximum iterations (%d), forcing delta clear", max_iterations);
+        data->delta_x = 0;
+        data->delta_y = 0;
     }
 
     if (!cfg->track_remainders) {
