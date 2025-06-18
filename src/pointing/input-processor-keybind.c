@@ -160,8 +160,10 @@ static int zip_keybind_handle_event(const struct device *dev, struct input_event
     // Accumulate movement - this blocks the original mouse event
     if (event->code == INPUT_REL_X) {
         data->last_delta_x = value;
+        event->code = 0;
     } else if (event->code == INPUT_REL_Y) {
         data->last_delta_y = value;
+        event->code = 0;
     }
 
     // Skip processing if movement is too small or too large, but still block the event
