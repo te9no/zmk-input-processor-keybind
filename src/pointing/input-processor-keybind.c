@@ -140,43 +140,33 @@ static int zip_keybind_handle_event(const struct device *dev, struct input_event
     struct zip_keybind_data *data = dev->data;
     int32_t value = event->value;
 
-    // Only process relative input events (mouse movement)
-    if (event->type != INPUT_EV_REL) {
-        LOG_INF("Only process relative input events: dev: %d type: %d code: %d value: %d",
-                state->input_device_index, event->type, event->code, value);
+    // 起動から10秒経過するまで処理をスキップ
+    if (k_uptime_get() - data->start_time < 10000) {
         return ZMK_INPUT_PROC_CONTINUE;
     }
-    
-    // Only process X/Y movement events, let other events continue
-    if (event->code != INPUT_REL_X && event->code != INPUT_REL_Y) {
-        LOG_INF("Only process X/Y movement events: dev: %d code: %d value: %d", state->input_device_index,
-                event->code, value);
+
+    if (event->type != INPUT_EV_REL) {
         return ZMK_INPUT_PROC_CONTINUE;
     }
 
     LOG_DBG("dev: %d evt: %d val: %d thresh: %d sync: %d dx: %d dy: %d", state->input_device_index,
             event->code, value, cfg->threshold, (int)event->sync, data->delta_x, data->delta_y);
 
-    // Accumulate movement - this blocks the original mouse event
+    // cutoff small or very large movements
+    if (cfg->threshold > abs(value) || abs(value) > cfg->max_threshold)
+        return ZMK_INPUT_PROC_STOP;
+
+    // Accumulate movement
     if (event->code == INPUT_REL_X) {
         data->last_delta_x = value;
-        event->code = 0;
     } else if (event->code == INPUT_REL_Y) {
         data->last_delta_y = value;
-        event->code = 0;
-    }
-
-    // Skip processing if movement is too small or too large, but still block the event
-    if (cfg->threshold > abs(value) || abs(value) > cfg->max_threshold) {
-        LOG_INF("Skipping event: dev: %d code: %d value: %d threshold: %d max_threshold: %d",
-                state->input_device_index, event->code, value, cfg->threshold, cfg->max_threshold);
-        return ZMK_INPUT_PROC_STOP;
+    } else {
+        return ZMK_INPUT_PROC_CONTINUE;
     }
 
     // wait until full movement readed
     if (!event->sync)
-        LOG_INF("Skipping event2: dev: %d code: %d value: %d sync: %d",
-                state->input_device_index, event->code, value, (int)event->sync);
         return ZMK_INPUT_PROC_STOP;
 
     int32_t movement = approx_hypot(abs(data->last_delta_x), abs(data->last_delta_y));
@@ -235,7 +225,7 @@ static int exec_one_binding(const struct zip_keybind_data *data,
         return ret;
     }
 
-    return ZMK_INPUT_PROC_STOP;
+    return 0;
 }
 
 static int exec_two_bindings(const struct zip_keybind_data *data,
@@ -270,7 +260,7 @@ static int exec_two_bindings(const struct zip_keybind_data *data,
         return ret;
     }
 
-    return ZMK_INPUT_PROC_STOP;
+    return 0;
 }
 
 static void press_work_cb(struct k_work *work) {
@@ -279,12 +269,7 @@ static void press_work_cb(struct k_work *work) {
     const struct device *dev = data->dev;
     const struct zip_keybind_config *cfg = dev->config;
 
-    // Prevent infinite loops with a maximum iteration limit
-    int max_iterations = cfg->max_pending_activations * 2;
-    int iteration_count = 0;
-
-    while (has_pending_movement(data, cfg) && iteration_count < max_iterations) {
-        iteration_count++;
+    while (has_pending_movement(data, cfg)) {
         int idx = -1;
         int idy = -1;
 
@@ -314,23 +299,10 @@ static void press_work_cb(struct k_work *work) {
             exec_one_binding(data, cfg, idx);
         } else if (idy >= 0) {
             exec_one_binding(data, cfg, idy);
-        } else {
-            // Emergency exit if no movement processed - clear remaining deltas
-            LOG_WRN("No movement processed but pending detected - clearing deltas");
-            data->delta_x = 0;
-            data->delta_y = 0;
-            break;
         }
 
         if (cfg->wait_ms > 0)
             k_sleep(K_MSEC(cfg->wait_ms));
-    }
-
-    // Warn if we hit the iteration limit
-    if (iteration_count >= max_iterations) {
-        LOG_WRN("Hit maximum iterations (%d), forcing delta clear", max_iterations);
-        data->delta_x = 0;
-        data->delta_y = 0;
     }
 
     if (!cfg->track_remainders) {
