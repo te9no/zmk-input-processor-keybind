@@ -52,6 +52,13 @@ struct zip_keybind_data {
 
     const struct device *dev;
     struct k_work_delayable press_work;
+    struct k_work_delayable release_work;
+    int64_t start_time;
+    
+    // 解放予定のbinding情報
+    struct zmk_behavior_binding pending_release_binding;
+    struct zmk_behavior_binding_event pending_release_event;
+    bool has_pending_release;
 };
 
 static inline bool has_pending_movement(const struct zip_keybind_data *data,
@@ -192,12 +199,23 @@ static int zip_keybind_handle_event(const struct device *dev, struct input_event
     return ZMK_INPUT_PROC_STOP;
 }
 
+static void release_work_cb(struct k_work *work) {
+    struct k_work_delayable *d_work = k_work_delayable_from_work(work);
+    struct zip_keybind_data *data = CONTAINER_OF(d_work, struct zip_keybind_data, release_work);
+    
+    if (data->has_pending_release) {
+        LOG_DBG("Releasing binding after tap delay");
+        zmk_behavior_invoke_binding(&data->pending_release_binding, data->pending_release_event, false);
+        data->has_pending_release = false;
+    }
+}
+
 static inline uint32_t get_position(const struct zip_keybind_data *data,
                                     const struct zip_keybind_config *cfg) {
     return ZMK_VIRTUAL_KEY_POSITION_BEHAVIOR_INPUT_PROCESSOR(data->device_index, cfg->index);
 }
 
-static int exec_one_binding(const struct zip_keybind_data *data,
+static int exec_one_binding(struct zip_keybind_data *data,
                             const struct zip_keybind_config *cfg, int idx) {
     struct zmk_behavior_binding_event behavior_event = {
         .position = get_position(data, cfg),
@@ -211,24 +229,34 @@ static int exec_one_binding(const struct zip_keybind_data *data,
             cfg->bindings[idx].behavior_dev, cfg->bindings[idx].param1, cfg->bindings[idx].param2,
             cfg->tap_ms, cfg->wait_ms);
 
-    int ret = zmk_behavior_invoke_binding(&cfg->bindings[idx], behavior_event, true);
+    int ret = zmk_behavior_invoke_binding(&cfg->bindings[idx], behavior_event, true); // キーを押す
     if (ret < 0) {
         return ret;
     }
 
-    if (cfg->tap_ms > 0)
-        k_sleep(K_MSEC(cfg->tap_ms));
-    behavior_event.timestamp = k_uptime_get();
-
-    ret = zmk_behavior_invoke_binding(&cfg->bindings[idx], behavior_event, false);
-    if (ret < 0) {
-        return ret;
+    // tap_msが0より大きい場合は遅延解放をスケジュール
+    if (cfg->tap_ms > 0) {
+        // 解放する情報を保存
+        data->pending_release_binding = cfg->bindings[idx];
+        data->pending_release_event = behavior_event;
+        data->pending_release_event.timestamp = k_uptime_get();
+        data->has_pending_release = true;
+        
+        // 遅延解放をスケジュール
+        k_work_schedule(&data->release_work, K_MSEC(cfg->tap_ms));
+    } else {
+        // すぐに解放
+        behavior_event.timestamp = k_uptime_get();
+        ret = zmk_behavior_invoke_binding(&cfg->bindings[idx], behavior_event, false);
+        if (ret < 0) {
+            return ret;
+        }
     }
 
     return 0;
 }
 
-static int exec_two_bindings(const struct zip_keybind_data *data,
+static int exec_two_bindings(struct zip_keybind_data *data,
                              const struct zip_keybind_config *cfg, int idx, int idy) {
     struct zmk_behavior_binding_event behavior_event = {
         .position =
@@ -321,8 +349,11 @@ static int zip_keybind_init(const struct device *dev) {
 
     data->dev = dev;
     data->max_delta = cfg->max_pending_activations * cfg->tick;
+    data->start_time = k_uptime_get(); // start_timeを初期化
+    data->has_pending_release = false; // 初期化
 
     k_work_init_delayable(&data->press_work, press_work_cb);
+    k_work_init_delayable(&data->release_work, release_work_cb);
     return 0;
 }
 
@@ -334,6 +365,7 @@ static int zip_keybind_init(const struct device *dev) {
     static struct zip_keybind_data zip_keybind_data_##n = {                                        \
         .delta_x = 0,                                                                              \
         .delta_y = 0,                                                                              \
+        .has_pending_release = false,                                                              \
     };                                                                                             \
     static struct zmk_behavior_binding zip_keybind_config_bindings_##n[] =                         \
         TRANSFORMED_BINDINGS(n);                                                                   \
