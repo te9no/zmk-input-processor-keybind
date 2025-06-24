@@ -9,6 +9,7 @@
 #include <zephyr/input/input.h>
 #include <zephyr/device.h>
 #include <zephyr/sys/dlist.h>
+#include <zephyr/init.h>
 #include <drivers/behavior.h>
 #include <zmk/keymap.h>
 #include <zmk/behavior.h>
@@ -357,6 +358,6 @@ static int zip_keybind_init(const struct device *dev) {
         .max_pending_activations = DT_INST_PROP_OR(n, max_pending_activations, 5)};                \
     DEVICE_DT_INST_DEFINE(n, &zip_keybind_init, NULL, &zip_keybind_data_##n,                       \
                           &zip_keybind_config_##n, POST_KERNEL,                                    \
-                          CONFIG_KERNEL_INIT_PRIORITY_DEFAULT, &zip_keybind_driver_api);
+                          CONFIG_INPUT_INIT_PRIORITY, &zip_keybind_driver_api);
 
 DT_INST_FOREACH_STATUS_OKAY(ZIP_KEYBIND_INST)
