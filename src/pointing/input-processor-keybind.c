@@ -9,7 +9,6 @@
 #include <zephyr/input/input.h>
 #include <zephyr/device.h>
 #include <zephyr/sys/dlist.h>
-#include <zephyr/init.h>
 #include <drivers/behavior.h>
 #include <zmk/keymap.h>
 #include <zmk/behavior.h>
@@ -23,7 +22,7 @@
 
 #define DT_DRV_COMPAT zmk_input_processor_keybind
 
-LOG_MODULE_REGISTER(input_processor_keybind, CONFIG_ZMK_LOG_LEVEL);
+LOG_MODULE_DECLARE(zmk, CONFIG_ZMK_LOG_LEVEL);
 
 struct zip_keybind_config {
     uint8_t index;
@@ -53,13 +52,6 @@ struct zip_keybind_data {
 
     const struct device *dev;
     struct k_work_delayable press_work;
-    struct k_work_delayable release_work;
-    int64_t start_time;
-    
-    // 解放予定のbinding情報
-    struct zmk_behavior_binding pending_release_binding;
-    struct zmk_behavior_binding_event pending_release_event;
-    bool has_pending_release;
 };
 
 static inline bool has_pending_movement(const struct zip_keybind_data *data,
@@ -194,19 +186,18 @@ static int zip_keybind_handle_event(const struct device *dev, struct input_event
 
     if (has_pending_movement(data, cfg)) {
         data->device_index = state->input_device_index;
-        // 作業をすぐにスケジュールする (既に保留中の場合は更新)
         k_work_schedule(&data->press_work, K_NO_WAIT);
     }
 
     return ZMK_INPUT_PROC_STOP;
 }
 
-static inline uint32_t get_position(struct zip_keybind_data *data,
+static inline uint32_t get_position(const struct zip_keybind_data *data,
                                     const struct zip_keybind_config *cfg) {
     return ZMK_VIRTUAL_KEY_POSITION_BEHAVIOR_INPUT_PROCESSOR(data->device_index, cfg->index);
 }
 
-static int exec_one_binding(struct zip_keybind_data *data,
+static int exec_one_binding(const struct zip_keybind_data *data,
                             const struct zip_keybind_config *cfg, int idx) {
     struct zmk_behavior_binding_event behavior_event = {
         .position = get_position(data, cfg),
@@ -220,34 +211,24 @@ static int exec_one_binding(struct zip_keybind_data *data,
             cfg->bindings[idx].behavior_dev, cfg->bindings[idx].param1, cfg->bindings[idx].param2,
             cfg->tap_ms, cfg->wait_ms);
 
-    int ret = zmk_behavior_invoke_binding(&cfg->bindings[idx], behavior_event, true); // キーを押す
+    int ret = zmk_behavior_invoke_binding(&cfg->bindings[idx], behavior_event, true);
     if (ret < 0) {
         return ret;
     }
 
-    // tap_msが0より大きい場合は遅延解放をスケジュール
-    if (cfg->tap_ms > 0) {
-        // 解放する情報を保存
-        data->pending_release_binding = cfg->bindings[idx];
-        data->pending_release_event = behavior_event;
-        data->pending_release_event.timestamp = k_uptime_get();
-        data->has_pending_release = true;
-        
-        // 遅延解放をスケジュール
-        k_work_schedule(&data->release_work, K_MSEC(cfg->tap_ms));
-    } else {
-        // すぐに解放
-        behavior_event.timestamp = k_uptime_get();
-        ret = zmk_behavior_invoke_binding(&cfg->bindings[idx], behavior_event, false);
-        if (ret < 0) {
-            return ret;
-        }
+    if (cfg->tap_ms > 0)
+        k_sleep(K_MSEC(cfg->tap_ms));
+    behavior_event.timestamp = k_uptime_get();
+
+    ret = zmk_behavior_invoke_binding(&cfg->bindings[idx], behavior_event, false);
+    if (ret < 0) {
+        return ret;
     }
 
     return 0;
 }
 
-static int exec_two_bindings(struct zip_keybind_data *data,
+static int exec_two_bindings(const struct zip_keybind_data *data,
                              const struct zip_keybind_config *cfg, int idx, int idy) {
     struct zmk_behavior_binding_event behavior_event = {
         .position =
@@ -262,35 +243,24 @@ static int exec_two_bindings(struct zip_keybind_data *data,
             cfg->bindings[idx].behavior_dev, cfg->bindings[idx].param1, cfg->bindings[idx].param2,
             cfg->tap_ms, cfg->wait_ms);
 
-    int ret = zmk_behavior_invoke_binding(&cfg->bindings[idx], behavior_event, true); // キーを押す
+    int ret = zmk_behavior_invoke_binding(&cfg->bindings[idx], behavior_event, true);
     if (ret < 0) {
         return ret;
     }
 
-    // もう一方のバインディングをトリガーする (内部でタップ遅延が処理される)
+    // mutual tap delay will be handled inside
     ret = exec_one_binding(data, cfg, idy);
     if (ret < 0) {
         return ret;
     }
 
     behavior_event.timestamp = k_uptime_get();
-    ret = zmk_behavior_invoke_binding(&cfg->bindings[idx], behavior_event, false); // キーを離す
+    ret = zmk_behavior_invoke_binding(&cfg->bindings[idx], behavior_event, false);
     if (ret < 0) {
         return ret;
     }
 
     return 0;
-}
-
-static void release_work_cb(struct k_work *work) {
-    struct k_work_delayable *d_work = k_work_delayable_from_work(work);
-    struct zip_keybind_data *data = CONTAINER_OF(d_work, struct zip_keybind_data, release_work);
-    
-    if (data->has_pending_release) {
-        LOG_DBG("Releasing binding after tap delay");
-        zmk_behavior_invoke_binding(&data->pending_release_binding, data->pending_release_event, false);
-        data->has_pending_release = false;
-    }
 }
 
 static void press_work_cb(struct k_work *work) {
@@ -299,49 +269,45 @@ static void press_work_cb(struct k_work *work) {
     const struct device *dev = data->dev;
     const struct zip_keybind_config *cfg = dev->config;
 
-    // 1回のワーク実行につき、1回の移動「ティック」のみを処理
-    int idx = -1;
-    int idy = -1;
+    while (has_pending_movement(data, cfg)) {
+        int idx = -1;
+        int idy = -1;
 
-    if (abs(data->delta_x) >= cfg->tick) {
-        if (data->delta_x > 0) { // RIGHT
-            idx = 0;
-            data->delta_x -= cfg->tick;
-        } else { // LEFT
-            idx = 1;
-            data->delta_x += cfg->tick;
+        if (abs(data->delta_x) >= cfg->tick) {
+            if (data->delta_x > 0) { // RIGHT
+                idx = 0;
+                data->delta_x -= cfg->tick;
+            } else { // LEFT
+                idx = 1;
+                data->delta_x += cfg->tick;
+            }
         }
+
+        if (abs(data->delta_y) >= cfg->tick) {
+            if (data->delta_y > 0) { // UP
+                idy = 3;
+                data->delta_y -= cfg->tick;
+            } else { // DOWN
+                idy = 2;
+                data->delta_y += cfg->tick;
+            }
+        }
+
+        if (idx >= 0 && idy >= 0) {
+            exec_two_bindings(data, cfg, idx, idy);
+        } else if (idx >= 0) {
+            exec_one_binding(data, cfg, idx);
+        } else if (idy >= 0) {
+            exec_one_binding(data, cfg, idy);
+        }
+
+        if (cfg->wait_ms > 0)
+            k_sleep(K_MSEC(cfg->wait_ms));
     }
 
-    if (abs(data->delta_y) >= cfg->tick) {
-        if (data->delta_y > 0) { // UP
-            idy = 3;
-            data->delta_y -= cfg->tick;
-        } else { // DOWN
-            idy = 2;
-            data->delta_y += cfg->tick;
-        }
-    }
-
-    if (idx >= 0 && idy >= 0) {
-        exec_two_bindings(data, cfg, idx, idy);
-    } else if (idx >= 0) {
-        exec_one_binding(data, cfg, idx);
-    } else if (idy >= 0) {
-        exec_one_binding(data, cfg, idy);
-    }
-
-    // 1ティック処理後、さらに保留中の動きがあるか確認
-    if (has_pending_movement(data, cfg)) {
-        // ある場合、wait-ms 遅延でこのワークアイテムを再スケジュール
-        k_work_schedule(&data->press_work, K_MSEC(cfg->wait_ms));
-    } else {
-        // 保留中の動きがない場合、remainders を追跡しない場合はクリア
-        if (!cfg->track_remainders) {
-            data->delta_x = 0;
-            data->delta_y = 0;
-        }
-        // スケジュールする必要はない、今回の作業はこれで完了
+    if (!cfg->track_remainders) {
+        data->delta_x = 0;
+        data->delta_y = 0;
     }
 }
 
@@ -355,11 +321,8 @@ static int zip_keybind_init(const struct device *dev) {
 
     data->dev = dev;
     data->max_delta = cfg->max_pending_activations * cfg->tick;
-    data->start_time = k_uptime_get(); // start_timeを初期化
-    data->has_pending_release = false; // 初期化
 
     k_work_init_delayable(&data->press_work, press_work_cb);
-    k_work_init_delayable(&data->release_work, release_work_cb);
     return 0;
 }
 
@@ -371,7 +334,6 @@ static int zip_keybind_init(const struct device *dev) {
     static struct zip_keybind_data zip_keybind_data_##n = {                                        \
         .delta_x = 0,                                                                              \
         .delta_y = 0,                                                                              \
-        .has_pending_release = false,                                                              \
     };                                                                                             \
     static struct zmk_behavior_binding zip_keybind_config_bindings_##n[] =                         \
         TRANSFORMED_BINDINGS(n);                                                                   \
@@ -388,6 +350,6 @@ static int zip_keybind_init(const struct device *dev) {
         .max_pending_activations = DT_INST_PROP_OR(n, max_pending_activations, 5)};                \
     DEVICE_DT_INST_DEFINE(n, &zip_keybind_init, NULL, &zip_keybind_data_##n,                       \
                           &zip_keybind_config_##n, POST_KERNEL,                                    \
-                          CONFIG_INPUT_INIT_PRIORITY, &zip_keybind_driver_api);
+                          CONFIG_KERNEL_INIT_PRIORITY_DEFAULT, &zip_keybind_driver_api);
 
 DT_INST_FOREACH_STATUS_OKAY(ZIP_KEYBIND_INST)
